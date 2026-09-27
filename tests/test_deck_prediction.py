@@ -15,6 +15,7 @@ from ygoai.deck_prediction.data import (
     split_decks,
     validate_and_deduplicate,
 )
+from ygoai.deck_prediction.download_meta import download
 from ygoai.deck_prediction.import_decks import import_decks
 from ygoai.deck_prediction.model import DeckMaskPredictor
 from ygoai.deck_prediction.train import train
@@ -108,6 +109,57 @@ class DeckPredictionTests(unittest.TestCase):
             {item["reason"] for item in report["rejected"]},
             {"format_not_ocg", "banlist_not_2026_07", "unsupported_card_ids", "token_cards_in_deck"},
         )
+
+    def test_meta_downloader_fetches_filters_maps_and_keeps_raw_local(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw_decks = [
+                {
+                    "_id": "meta-deck-1", "created": "2026-07-05T11:00:00.000Z",
+                    "ocg": True, "genesys": False, "illegal": False,
+                    "event": {"format": "OCG"}, "url": "/event/alpha/player/deck-id/",
+                    "deckType": {"name": "Alpha"},
+                    "main": [
+                        {"card": {"_id": "meta-card-101", "name": "Alpha"}, "amount": 2},
+                        {"card": {"_id": "meta-card-missing", "name": "Unmapped Card"}, "amount": 1},
+                    ],
+                    "extra": [{"card": {"_id": "meta-card-103", "name": "Gamma"}, "amount": 1}],
+                    "side": [{"card": {"_id": "meta-card-side", "name": "Side"}, "amount": 1}],
+                },
+                {
+                    "_id": "old-deck", "created": "2026-06-30T11:00:00.000Z",
+                    "ocg": True, "genesys": False, "illegal": False,
+                },
+            ]
+            card_docs = {
+                "meta-card-101": {"_id": "meta-card-101", "name": "Alpha", "konamiID": "101"},
+                "meta-card-103": {"_id": "meta-card-103", "name": "Gamma", "konamiID": "103"},
+            }
+            requested = []
+
+            def fake_request(url):
+                requested.append(url)
+                if "/top-decks?" in url:
+                    return raw_decks
+                ids = [key for key in card_docs if key in url]
+                return [card_docs[key] for key in ids]
+
+            report = download(
+                output_dir=str(root / "raw"), banlist_date="2026-07-01",
+                batch_size=1, delay_seconds=0, request=fake_request,
+            )
+            snapshot = json.loads(Path(report["normalized_snapshot"]).read_text(encoding="utf-8"))
+            raw = json.loads(Path(report["raw_api_snapshot"]).read_text(encoding="utf-8"))
+        self.assertEqual(report["api_rows_received"], 2)
+        self.assertEqual(report["filtered_decks"], 1)
+        self.assertEqual(report["card_documents_requested"], 3)
+        self.assertEqual(report["unmapped_card_documents"], 1)
+        self.assertEqual(snapshot["decks"][0]["main"][0]["code"], 101)
+        self.assertEqual(snapshot["decks"][0]["main"][1]["name"], "Unmapped Card")
+        self.assertEqual(snapshot["decks"][0]["source_url"], "https://www.yugiohmeta.com/event/alpha/player/deck-id/")
+        self.assertEqual(len(raw), 2)
+        self.assertTrue(any("created[$gte]=2026-07-01" in url for url in requested))
+        self.assertTrue(any("ocg=true" in url and "illegal=false" in url for url in requested))
 
     def test_deck_split_is_stable_and_disjoint(self):
         decks = [Deck(f"deck-{i}", str(i), "test", None, (101 + i,), ()) for i in range(8)]

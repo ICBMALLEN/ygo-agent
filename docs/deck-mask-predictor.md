@@ -8,7 +8,21 @@
 - 禁限卡表来源：[Yu-Gi-Oh! Meta 的 OCG 2026-07 禁限卡表说明](https://www.yugiohmeta.com/articles/news/july-1-2026/ocg-forbidden-list)，对应官方生效日期为 2026-07-01。
 - 牌表数据归属：[Yu-Gi-Oh! Meta 服务条款](https://www.yugiohmeta.com/terms-of-service)。查阅的页面没有明确授予牌表数据再分发许可，因此原始筛选快照、导入结果、报告和模型都保存在被 `.gitignore` 排除的 `data/deck_prediction/`，不要把这些文件加入公开提交。
 
-导入器接收本地 JSON 快照，不会抓取或复制网站内容。JSON 可是数组，也可用 `decks`、`results` 或 `items` 包一层。每条记录需要 `main` 和 `extra` 卡片列表；卡片可写成卡片密码、牌名、重复密码数组或 `{密码: 数量}` 映射。若行中含有 `format` / `banlist` 字段，导入器会排除非 OCG 或非 2026 年 7 月结果；字段缺失时，将文件视为已按指定筛选条件导出的结果。例子：
+下载器使用 Yu-Gi-Oh! Meta 页面当前调用的公开 `/api/v1/top-decks` 和 `/api/v1/cards` 接口，不需要账号登录。它按 2026-07-01 起、OCG、非 Genesys、禁限卡表合法筛选，并分批把 Meta 卡片记录 ID 映射到 Konami 卡片密码。原始 API 响应和可导入的规范化快照都只写入本机目录。若网站更改接口或返回结构，下载器会报错，不会静默生成空数据。
+
+先下载，再导入并合并本地牌组：
+
+```bash
+python3 -m ygoai.deck_prediction.download_meta \
+  --output-dir data/deck_prediction/raw \
+  --banlist-date 2026-07-01
+
+python3 -m ygoai.deck_prediction.import_decks \
+  --meta-json data/deck_prediction/raw/meta-ocg-post-2026-07-01.json \
+  --cards-db assets/locale/en/cards.cdb
+```
+
+如需使用已有快照，导入器接受 JSON 数组，或用 `decks`、`results`、`items` 包一层的对象。每条记录需要 `main` 和 `extra` 卡片列表；卡片可写成卡片密码、牌名、重复密码数组或 `{密码: 数量}` 映射。若行中含有 `format` / `banlist` 字段，导入器会排除非 OCG 或非 2026 年 7 月结果；字段缺失时，将文件视为已按指定筛选条件导出的结果。例子：
 
 ```json
 {
@@ -30,12 +44,6 @@
 ## 导入牌表
 
 在仓库根目录运行。Meta 的 JSON 文件是本机输入文件；命令可重复传入多个快照。
-
-```bash
-python3 -m ygoai.deck_prediction.import_decks \
-  --meta-json data/deck_prediction/raw/ocg-july-2026.json \
-  --cards-db assets/locale/en/cards.cdb
-```
 
 导入器还合并 `assets/deck/` 下的顶层 `.ydk` 牌组。若某个已跟踪的 `.ydk` 在工作区被删除，会从当前 Git `HEAD` 读取其内容，不会恢复或改写工作区文件；嵌套在 `unsupported/`、`unused/` 等目录中的牌组不会自动加入。Side Deck 会忽略。牌表按主卡组与额外卡组的卡片数量去重，牌序和 Side Deck 不参与比较。
 
