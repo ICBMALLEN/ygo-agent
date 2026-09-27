@@ -16,6 +16,7 @@
 checkpoints
 runs
 logs
+data/deck_prediction/
 k8s_job/
 script
 assets/locale/*/*.cdb
